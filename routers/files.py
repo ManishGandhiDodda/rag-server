@@ -10,8 +10,9 @@ router = APIRouter(
 
 class FileUploadRequest(BaseModel):
     filename: str
-    file_size: str
+    file_size: int 
     file_type: str
+
 
 @router.get("/api/projects/{project_id}/files")
 async def get_project_files(
@@ -30,52 +31,52 @@ async def get_project_files(
     except Exception as e:
         raise HTTPException(status_code=500, detail = f"Failed to get project files: {str(e)}")
 
+
 @router.post("/api/projects/{project_id}/files/upload-url")
 async def get_upload_url(
-    project_id: str,
-    file_request: FileUploadRequest,
+    project_id: str, 
+    file_request: FileUploadRequest, 
     clerk_id: str = Depends(get_current_user)
 ):
     try:
-        # Verify project exists and belongs to user
-        project_result = supabase.table("projects").select("id").eq("id",project_id).eq("clerk_id", clerk_id).execute()
+        # Verify project exists and belongs to the user 
+        projects_result = supabase.table("projects").select("id").eq("id", project_id).eq("clerk_id", clerk_id).execute()
 
-        if not project_result.data:
+        if not projects_result.data:
             raise HTTPException(status_code=400, detail="Project not found or access denied")
         
-        # Generate a Unique S3 key
+        # Generate unique S3 key
         file_extension = file_request.filename.split('.')[-1] if '.' in file_request.filename else ''
         unique_id = str(uuid.uuid4())
         s3_key = f"projects/{project_id}/documents/{unique_id}.{file_extension}"
 
-        # Generate Pre-Signed URL ( Which will expire in 1 hour )
+        # Generate presigned URL (expire in 1 hour)
         presigned_url = s3_client.generate_presigned_url(
-            "put_object",
+            'put_object',
             Params={
-                "Bucket": BUCKET_NAME,
-                "Key": s3_key,
-                "ContentType": file_request.file_type
+                'Bucket': BUCKET_NAME,
+                'Key': s3_key,
+                'ContentType': file_request.file_type
             },
-            ExpiresIn = 3600 # 1 Hour
+            ExpiresIn=3600  # 1 hour
         )
 
-        # Create a database record with pending status
+        # Create database record with pending status
         document_result = supabase.table("project_documents").insert({
             "project_id": project_id,
-            "filename": file_request.filename,
-            "s3_key": s3_key,
-            "file_size": file_request.file_size,
-            "file_type": file_request.file_type,
-            "processing_status": 'uploading',
-            'clerk_id': clerk_id
-        }
-        ).execute()
+            'filename': file_request.filename,
+            's3_key': s3_key,
+            'file_size': file_request.file_size,
+            'file_type': file_request.file_type,
+            'processing_status': 'uploading',
+            'clerk_id': clerk_id 
+        }).execute()
 
         if not document_result.data:
-            raise HTTPException(status_code=500, detail="Failed to create document Record")
+            raise HTTPException(status_code=500, detail="Failed to create document record")
         
         return {
-            "message": "upload URL generated successfully",
+            "message": "Upload URL generated successfully",
             "data": {
                 "upload_url": presigned_url,
                 "s3_key": s3_key,
@@ -84,7 +85,40 @@ async def get_upload_url(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail = f"Failed to generate presigned url: {str(e)}")
+        raise HTTPException(status_code=500, detail = f"Failed to generate the presigned URL: {str(e)}")
+
+
+@router.post("/api/projects/{project_id}/files/confirm")
+async def confirm_file_upload(
+    project_id: str, 
+    confirm_request: dict, 
+    clerk_id: str = Depends(get_current_user)
+):
+    try:
+        s3_key = confirm_request.get("s3_key")
+
+        if not s3_key:
+            raise HTTPException(status_code=400, detail="s3_key is required")
+
+        # Update document status
+        result = supabase.table("project_documents").update({
+            "processing_status": "queued"
+        }).eq("s3_key", s3_key).eq("project_id", project_id).eq("clerk_id", clerk_id).execute()
+
+        document = result.data[0]
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Document not found or access denied")
+
+        # Start background preprocessing of the current file with Celery
 
 
 
+        # Return JSON 
+        return {
+            "message": "Upload confirmed, processing started with Celery", 
+            "data": document
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail = f"Failed to confirm upload: {str(e)}")
