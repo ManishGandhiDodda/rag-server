@@ -10,6 +10,7 @@ from unstructured.partition.html import partition_html
 from unstructured.partition.pptx import partition_pptx
 from unstructured.partition.text import partition_text
 from unstructured.partition.md import partition_md
+from unstructured.partition.auto import partition
 
 
 from unstructured.chunking.title import chunk_by_title
@@ -129,7 +130,7 @@ def download_and_partition(document_id: str, document: dict):
         response = scrapingbee_client.get(url)
         
         # Save to temp file
-        temp_file = f"C:\\Temp\{document_id}.html"
+        temp_file = f"C:\\Temp\\{document_id}.html"
         with open(temp_file, 'wb') as f:
             f.write(response.content)
         
@@ -203,8 +204,10 @@ def partition_document(temp_file: str, file_type: str, source_type: str = "file"
         return partition_md(
             filename=temp_file
         )
-    
-
+    else:
+        return partition(
+            filename=temp_file
+        ) 
 
 
 def analyze_elements(elements):
